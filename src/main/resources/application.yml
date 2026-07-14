@@ -4,11 +4,33 @@ server:
 spring:
   application:
     name: aegis-scim-provisioning-service
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: ${AEGIS_ISSUER:http://localhost:9000}
+  datasource:
+    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/aegis_scim}
+    username: ${POSTGRES_USER:aegis}
+    password: ${POSTGRES_PASSWORD:dev-only-change-me}
+  jpa:
+    hibernate:
+      # Dev/test convenience. Production uses versioned migrations (Flyway) with ddl-auto=validate.
+      ddl-auto: update
+    open-in-view: false
+
+aegis:
+  jwt:
+    # Keys fetched in-network; issuers validated against an allowlist (Docker split-horizon — see
+    # ResourceServerJwtConfig). In Docker, AEGIS_JWKS_URI = http://authorization-server:9000/oauth2/jwks.
+    jwk-set-uri: ${AEGIS_JWKS_URI:http://localhost:9000/oauth2/jwks}
+    accepted-issuers: ${AEGIS_ACCEPTED_ISSUERS:http://localhost:9000,http://authorization-server:9000}
+  as:
+    # Authorization-server token endpoint (client_credentials) used to obtain a token for calling
+    # identity-service. In Docker this is http://authorization-server:9000/oauth2/token.
+    token-uri: ${AEGIS_AS_TOKEN_URI:http://localhost:9000/oauth2/token}
+  identity-service:
+    # identity-service is where provisioned SCIM users are forwarded (create/disable/enable).
+    base-url: ${AEGIS_IDENTITY_BASE_URL:http://localhost:9102}
+  scim:
+    # client_credentials identity used to authenticate this service to identity-service.
+    client-id: ${AEGIS_SCIM_CLIENT_ID:aegis-scim}
+    client-secret: ${AEGIS_SCIM_CLIENT_SECRET:dev-only-change-me}
 
 management:
   endpoints:
