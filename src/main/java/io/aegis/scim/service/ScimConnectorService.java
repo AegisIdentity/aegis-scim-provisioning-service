@@ -5,6 +5,9 @@ import io.aegis.scim.domain.ScimConnectorRepository;
 import io.aegis.scim.service.ScimExceptions.ScimUserNotFoundException;
 import io.aegis.scim.web.ConnectorDtos.ConnectorView;
 import io.aegis.scim.web.ConnectorDtos.CreatedConnector;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -22,6 +25,9 @@ public class ScimConnectorService {
     /** Path suffix the upstream appends to the gateway base to reach the SCIM endpoints. */
     static final String SCIM_BASE_URL_PATH = "/scim/v2";
 
+    /** How long a rotated-out token keeps authenticating so the upstream can be reconfigured (M-svc-4). */
+    static final Duration ROTATION_GRACE = Duration.ofHours(24);
+
     private final ScimConnectorRepository connectors;
 
     public ScimConnectorService(ScimConnectorRepository connectors) {
@@ -35,11 +41,30 @@ public class ScimConnectorService {
     }
 
     @Transactional
-    public CreatedConnector create(String tenantId, String name) {
+    public CreatedConnector create(String tenantId, String name, Integer expiresInDays) {
         requireTenant(tenantId);
         String rawToken = TokenHasher.newToken();
         ScimConnector connector = new ScimConnector(
                 UUID.randomUUID(), tenantId, name, TokenHasher.sha256Hex(rawToken));
+        if (expiresInDays != null && expiresInDays > 0) {
+            connector.setExpiresAt(Instant.now().plus(expiresInDays, ChronoUnit.DAYS));
+        }
+        ScimConnector saved = connectors.save(connector);
+        return new CreatedConnector(saved.getId().toString(), saved.getName(), saved.isEnabled(),
+                rawToken, SCIM_BASE_URL_PATH);
+    }
+
+    /**
+     * Rotate a connector's token (M-svc-4): issue a fresh raw token (returned once), while the current
+     * token stays valid for {@link #ROTATION_GRACE} so the upstream can be reconfigured without downtime.
+     */
+    @Transactional
+    public CreatedConnector rotate(String tenantId, UUID id) {
+        requireTenant(tenantId);
+        ScimConnector connector = connectors.findByTenantIdAndId(tenantId, id)
+                .orElseThrow(() -> new ScimUserNotFoundException("no such connector in tenant"));
+        String rawToken = TokenHasher.newToken();
+        connector.rotate(TokenHasher.sha256Hex(rawToken), Instant.now().plus(ROTATION_GRACE));
         ScimConnector saved = connectors.save(connector);
         return new CreatedConnector(saved.getId().toString(), saved.getName(), saved.isEnabled(),
                 rawToken, SCIM_BASE_URL_PATH);
@@ -54,7 +79,8 @@ public class ScimConnectorService {
     }
 
     private ConnectorView toView(ScimConnector c) {
-        return new ConnectorView(c.getId().toString(), c.getName(), c.isEnabled(), c.getCreatedAt());
+        return new ConnectorView(c.getId().toString(), c.getName(), c.isEnabled(), c.getCreatedAt(),
+                c.getExpiresAt(), c.getLastUsedAt());
     }
 
     private static void requireTenant(String tenantId) {

@@ -11,6 +11,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
@@ -71,13 +74,36 @@ public class ScimConnectorAuthFilter extends OncePerRequestFilter {
             writeUnauthorized(response, "missing bearer token");
             return;
         }
-        Optional<ScimConnector> connector = connectors.findByTokenHash(TokenHasher.sha256Hex(rawToken))
-                .filter(ScimConnector::isEnabled);
+        String presentedHash = TokenHasher.sha256Hex(rawToken);
+        Optional<ScimConnector> connector =
+                connectors.findByTokenHashOrPreviousTokenHash(presentedHash, presentedHash)
+                        .filter(ScimConnector::isEnabled);
         if (connector.isEmpty()) {
             writeUnauthorized(response, "invalid connector token");
             return;
         }
         ScimConnector c = connector.get();
+        Instant now = Instant.now();
+
+        // M-svc-5: compare hashes constant-time (defense-in-depth) to decide which slot matched.
+        boolean currentMatch = constantTimeHexEquals(presentedHash, c.getTokenHash());
+        boolean graceMatch = !currentMatch
+                && constantTimeHexEquals(presentedHash, c.getPreviousTokenHash())
+                && c.isPreviousTokenValid(now);
+        if (!currentMatch && !graceMatch) {
+            // Matched only a previous token whose grace window has closed (or a spurious index hit).
+            writeUnauthorized(response, "invalid connector token");
+            return;
+        }
+        // M-svc-4: enforce absolute token expiry.
+        if (c.isExpired(now)) {
+            writeUnauthorized(response, "connector token expired");
+            return;
+        }
+        // M-svc-4: last-used-at tracking.
+        c.markUsed(now);
+        connectors.save(c);
+
         request.setAttribute(TENANT_ATTRIBUTE, c.getTenantId());
         request.setAttribute(CONNECTOR_ID_ATTRIBUTE, c.getId().toString());
 
@@ -92,6 +118,16 @@ public class ScimConnectorAuthFilter extends OncePerRequestFilter {
         } finally {
             SecurityContextHolder.clearContext();
         }
+    }
+
+    /** Constant-time comparison of two hex token hashes (M-svc-5). Null-safe: null never matches. */
+    private static boolean constantTimeHexEquals(String presentedHash, String storedHash) {
+        if (presentedHash == null || storedHash == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                presentedHash.getBytes(StandardCharsets.UTF_8),
+                storedHash.getBytes(StandardCharsets.UTF_8));
     }
 
     private void writeUnauthorized(HttpServletResponse response, String detail) throws IOException {

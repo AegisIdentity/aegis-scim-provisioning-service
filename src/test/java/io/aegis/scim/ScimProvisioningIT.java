@@ -107,6 +107,32 @@ class ScimProvisioningIT {
     // --- SCIM endpoints (connector token) ---
 
     @Test
+    void rotating_a_connector_issues_a_new_token_and_keeps_the_old_valid_during_grace() throws Exception {
+        String oldToken = createConnector("rotate-co", "Entra");
+        String id = connectorIdFor("rotate-co");
+
+        // The old token authenticates before rotation.
+        mockMvc.perform(get("/scim/v2/Users").header(HttpHeaders.AUTHORIZATION, "Bearer " + oldToken))
+                .andExpect(status().isOk());
+
+        // Rotate -> a NEW raw token is returned once, different from the old one.
+        String rotateBody = mockMvc.perform(post("/api/v1/provisioning/connectors/" + id + "/rotate")
+                        .with(jwtForTenant("rotate-co", "admin", "tenant:admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isNotEmpty())
+                .andReturn().getResponse().getContentAsString();
+        String newToken = JsonPath.read(rotateBody, "$.token");
+        org.assertj.core.api.Assertions.assertThat(newToken).isNotEqualTo(oldToken);
+
+        // The new token authenticates.
+        mockMvc.perform(get("/scim/v2/Users").header(HttpHeaders.AUTHORIZATION, "Bearer " + newToken))
+                .andExpect(status().isOk());
+        // And the old token still authenticates during the grace window (no upstream downtime).
+        mockMvc.perform(get("/scim/v2/Users").header(HttpHeaders.AUTHORIZATION, "Bearer " + oldToken))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void scim_rejects_a_bad_bearer_token() throws Exception {
         mockMvc.perform(get("/scim/v2/Users").header(HttpHeaders.AUTHORIZATION, "Bearer not-a-real-token"))
                 .andExpect(status().isUnauthorized())

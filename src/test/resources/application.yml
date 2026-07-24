@@ -1,0 +1,6 @@
+# Test overrides. Testcontainers Postgres starts empty and there is no Flyway in this scaffold, so let
+# Hibernate build the schema for the test run (the shipped default is validate — see main application.yml).
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop

@@ -1,10 +1,13 @@
 package io.aegis.scim;
 
+import static io.aegis.commons.testing.AegisJwtTest.jwtForTenant;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import io.aegis.scim.service.ScimIdentityClient;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,5 +50,19 @@ class ScimSecurityTest {
     @Test
     void scim_requires_a_connector_bearer_token() throws Exception {
         mockMvc.perform(get("/scim/v2/Users")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void rotating_a_connector_requires_a_token() throws Exception {
+        mockMvc.perform(post("/api/v1/provisioning/connectors/" + UUID.randomUUID() + "/rotate"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void rotating_a_connector_requires_tenant_admin_scope() throws Exception {
+        // Authenticated but without tenant:admin -> 403.
+        mockMvc.perform(post("/api/v1/provisioning/connectors/" + UUID.randomUUID() + "/rotate")
+                        .with(jwtForTenant("acme", "u-1")))
+                .andExpect(status().isForbidden());
     }
 }

@@ -1,6 +1,7 @@
 package io.aegis.scim.web;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
 
@@ -10,11 +11,18 @@ public final class ConnectorDtos {
     private ConnectorDtos() {
     }
 
-    /** A connector as listed to the admin — the token is NEVER included here. */
-    public record ConnectorView(String id, String name, boolean enabled, Instant createdAt) {
+    /**
+     * A connector as listed to the admin — the token is NEVER included here. {@code expiresAt} is null
+     * for a non-expiring connector; {@code lastUsedAt} is null until the connector has authenticated a
+     * request (M-svc-4).
+     */
+    public record ConnectorView(String id, String name, boolean enabled, Instant createdAt,
+                                Instant expiresAt, Instant lastUsedAt) {
     }
 
-    public record CreateConnectorRequest(@NotBlank @Size(max = 128) String name) {
+    /** Create a connector. {@code expiresInDays} is optional; when set the token expires after that many days. */
+    public record CreateConnectorRequest(@NotBlank @Size(max = 128) String name,
+                                         @Positive Integer expiresInDays) {
     }
 
     /**

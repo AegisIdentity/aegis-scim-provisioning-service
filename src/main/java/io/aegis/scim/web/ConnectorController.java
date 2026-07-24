@@ -43,10 +43,19 @@ public class ConnectorController {
     @PostMapping("/api/v1/provisioning/connectors")
     public ResponseEntity<CreatedConnector> create(@Valid @RequestBody CreateConnectorRequest request,
                                                    @AuthenticationPrincipal Jwt caller) {
-        CreatedConnector created = service.create(tenantOf(caller), request.name());
+        CreatedConnector created = service.create(tenantOf(caller), request.name(), request.expiresInDays());
         return ResponseEntity
                 .created(URI.create("/api/v1/provisioning/connectors/" + created.id()))
                 .body(created);
+    }
+
+    /**
+     * Rotate a connector's token (M-svc-4): returns a new raw token ONCE; the old token keeps working for
+     * a short grace window so the upstream can be reconfigured without downtime.
+     */
+    @PostMapping("/api/v1/provisioning/connectors/{id}/rotate")
+    public CreatedConnector rotate(@PathVariable UUID id, @AuthenticationPrincipal Jwt caller) {
+        return service.rotate(tenantOf(caller), id);
     }
 
     @DeleteMapping("/api/v1/provisioning/connectors/{id}")
