@@ -2,6 +2,15 @@ server:
   port: 9106
 
 spring:
+  kafka:
+    # Consume identity.user.* to drive outbound provisioning. Off unless a broker is configured.
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:}
+    consumer:
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      auto-startup: ${AEGIS_IDENTITY_CONSUMER_ENABLED:false}
   flyway:
     enabled: true
     # Pre-Flyway databases already have these tables (they were created by
