@@ -27,10 +27,13 @@ public class ScimUserService {
 
     private final ScimUserRepository users;
     private final ScimIdentityClient identityClient;
+    private final io.aegis.commons.audit.AuditRecorder audit;
 
-    public ScimUserService(ScimUserRepository users, ScimIdentityClient identityClient) {
+    public ScimUserService(ScimUserRepository users, ScimIdentityClient identityClient,
+                           io.aegis.commons.audit.AuditRecorder audit) {
         this.users = users;
         this.identityClient = identityClient;
+        this.audit = audit;
     }
 
     /** A normalized view of the inbound SCIM User attributes the service acts on. */
@@ -64,7 +67,9 @@ public class ScimUserService {
         } catch (Exception ex) {
             throw new ProvisioningFailedException("failed to provision user to identity-service", ex);
         }
-        return users.save(user);
+        ScimUser saved = users.save(user);
+        audit.record("scim", "scim.user.provisioned", tenantId, "scim-connector", saved.getUserName());
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -110,7 +115,10 @@ public class ScimUserService {
         ScimUser user = load(tenantId, id);
         applyActive(user, active);
         user.touch();
-        return users.save(user);
+        ScimUser saved = users.save(user);
+        audit.record("scim", active ? "scim.user.activated" : "scim.user.deactivated",
+                tenantId, "scim-connector", saved.getUserName());
+        return saved;
     }
 
     /** DELETE: deactivate in identity-service, then remove the local record. */
@@ -121,6 +129,7 @@ public class ScimUserService {
             identityClient.disable(user.getAegisUserId());
         }
         users.delete(user);
+        audit.record("scim", "scim.user.deleted", tenantId, "scim-connector", user.getUserName());
     }
 
     // --- internals ---

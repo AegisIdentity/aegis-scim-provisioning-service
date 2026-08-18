@@ -29,9 +29,12 @@ public class ScimConnectorService {
     static final Duration ROTATION_GRACE = Duration.ofHours(24);
 
     private final ScimConnectorRepository connectors;
+    private final io.aegis.commons.audit.AuditRecorder audit;
 
-    public ScimConnectorService(ScimConnectorRepository connectors) {
+    public ScimConnectorService(ScimConnectorRepository connectors,
+                                io.aegis.commons.audit.AuditRecorder audit) {
         this.connectors = connectors;
+        this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -50,6 +53,7 @@ public class ScimConnectorService {
             connector.setExpiresAt(Instant.now().plus(expiresInDays, ChronoUnit.DAYS));
         }
         ScimConnector saved = connectors.save(connector);
+        audit.record("scim", "scim.connector.created", tenantId, "system", saved.getName());
         return new CreatedConnector(saved.getId().toString(), saved.getName(), saved.isEnabled(),
                 rawToken, SCIM_BASE_URL_PATH);
     }
@@ -66,6 +70,7 @@ public class ScimConnectorService {
         String rawToken = TokenHasher.newToken();
         connector.rotate(TokenHasher.sha256Hex(rawToken), Instant.now().plus(ROTATION_GRACE));
         ScimConnector saved = connectors.save(connector);
+        audit.record("scim", "scim.connector.rotated", tenantId, "system", saved.getName());
         return new CreatedConnector(saved.getId().toString(), saved.getName(), saved.isEnabled(),
                 rawToken, SCIM_BASE_URL_PATH);
     }
@@ -76,6 +81,7 @@ public class ScimConnectorService {
         ScimConnector connector = connectors.findByTenantIdAndId(tenantId, id)
                 .orElseThrow(() -> new ScimUserNotFoundException("no such connector in tenant"));
         connectors.delete(connector);
+        audit.record("scim", "scim.connector.deleted", tenantId, "system", connector.getName());
     }
 
     private ConnectorView toView(ScimConnector c) {
